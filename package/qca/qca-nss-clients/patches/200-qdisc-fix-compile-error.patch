@@ -1,14 +1,282 @@
---- a/nss_qdisc/nss_qdisc.c
-+++ b/nss_qdisc/nss_qdisc.c
-@@ -2708,9 +2708,11 @@ static int nss_qdisc_if_event_cb(struct
- 	case NETDEV_BR_JOIN:
- 		nss_qdisc_info("Reveived NETDEV_BR_JOIN on interface %s\n",
- 				dev->name);
-+		goto fall_through;
- 	case NETDEV_BR_LEAVE:
- 		nss_qdisc_info("Reveived NETDEV_BR_LEAVE on interface %s\n",
- 				dev->name);
-+fall_through:
- 		br = nss_qdisc_get_dev_master(dev);
- 		if_num = nss_cmn_get_interface_number(nss_qdisc_ctx, dev);
- 
+*** a/nss_qdisc/nss_qdisc.c	2022-08-19 09:48:54.370000000 +0900
+--- b/nss_qdisc/nss_qdisc.c	2022-08-19 10:14:24.000000000 +0900
+***************
+*** 26,31 ****
+--- 26,32 ----
+  #include "nss_htb.h"
+  #include "nss_blackhole.h"
+  #include "nss_wred.h"
++ #include "nss_shaper.h"
+  
+  void *nss_qdisc_ctx;			/* Shaping context for nss_qdisc */
+  
+*************** int __nss_qdisc_init(struct Qdisc *sch,
+*** 2026,2032 ****
+  int __nss_qdisc_init(struct Qdisc *sch, struct nss_qdisc *nq, nss_shaper_node_type_t type, uint32_t classid, uint32_t accel_mode,
+  		struct netlink_ext_ack *extack)
+  {
+- 	int err;
+  #endif
+  	struct Qdisc *root;
+  	u32 parent;
+--- 2020,2025 ----
+*************** int __nss_qdisc_init(struct Qdisc *sch,
+*** 2039,2045 ****
+  #if defined(NSS_QDISC_PPE_SUPPORT)
+  	bool mode_ppe = false;
+  #endif
+! 	bool igs_put = false;
+  	if (accel_mode >= TCA_NSS_ACCEL_MODE_MAX) {
+  		nss_qdisc_warning("Qdisc %px (type %d) accel_mode:%u should be < %u\n",
+  					sch, nq->type, accel_mode, TCA_NSS_ACCEL_MODE_MAX);
+--- 2032,2038 ----
+  #if defined(NSS_QDISC_PPE_SUPPORT)
+  	bool mode_ppe = false;
+  #endif
+! 
+  	if (accel_mode >= TCA_NSS_ACCEL_MODE_MAX) {
+  		nss_qdisc_warning("Qdisc %px (type %d) accel_mode:%u should be < %u\n",
+  					sch, nq->type, accel_mode, TCA_NSS_ACCEL_MODE_MAX);
+*************** int __nss_qdisc_init(struct Qdisc *sch,
+*** 2138,2161 ****
+  	 */
+  	dev = qdisc_dev(sch);
+  
+- #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+- 	/*
+- 	 * Currently filter addition is only supported over IFB interfaces.
+- 	 * Therefore, perform tcf block allocation (which is used for storing
+- 	 * filter list) only if the input net device is an IFB device.
+- 	 */
+- 	if (netif_is_ifb_dev(dev)) {
+- 		err = tcf_block_get(&nq->block, &nq->filter_list, sch, extack);
+- 		if (err) {
+- 			nss_qdisc_error("%px: Unable to initialize tcf_block\n", &nq->block);
+- 			return -1;
+- 		}
+- 	} else {
+- 		RCU_INIT_POINTER(nq->filter_list, NULL);
+- 		nq->block = NULL;
+- 	}
+- #endif
+- 
+  	nss_qdisc_info("Qdisc %px (type %d) init dev: %px\n", nq->qdisc, nq->type, dev);
+  
+  	/*
+--- 2131,2136 ----
+*************** int __nss_qdisc_init(struct Qdisc *sch,
+*** 2353,2368 ****
+  		 * register for bridge bouncing as it will be responsible for
+  		 * bouncing packets to the NSS for bridge shaping.
+  		 */
+! 		if (!nss_igs_verify_if_num(nq->nss_interface_number)) {
+! 			nq->bounce_context = nss_shaper_register_shaper_bounce_bridge(nq->nss_interface_number,
+  					nss_qdisc_bounce_callback, nq->qdisc, THIS_MODULE);
+- 		} else {
+- 			nss_qdisc_error("Since %d is an IFB device, it cannot"
+- 					" register for bridge bouncing\n", nq->nss_interface_number);
+- 			nss_shaper_unregister_shaping(nq->nss_shaping_ctx);
+- 			atomic_set(&nq->state, NSS_QDISC_STATE_INIT_FAILED);
+- 			goto init_fail;
+- 		}
+  
+  		if (!nq->bounce_context) {
+  			nss_qdisc_error("Qdisc %px (type %d): is root but cannot register "
+--- 2328,2335 ----
+  		 * register for bridge bouncing as it will be responsible for
+  		 * bouncing packets to the NSS for bridge shaping.
+  		 */
+! 		nq->bounce_context = nss_shaper_register_shaper_bounce_bridge(nq->nss_interface_number,
+  					nss_qdisc_bounce_callback, nq->qdisc, THIS_MODULE);
+  
+  		if (!nq->bounce_context) {
+  			nss_qdisc_error("Qdisc %px (type %d): is root but cannot register "
+*************** int __nss_qdisc_init(struct Qdisc *sch,
+*** 2405,2436 ****
+  			/*
+  			 * Register for interface bounce shaping.
+  			 */
+! 			if (!nss_igs_verify_if_num(nq->nss_interface_number)) {
+! 				nq->bounce_context = nss_shaper_register_shaper_bounce_interface(nq->nss_interface_number,
+! 						nss_qdisc_bounce_callback, nq->qdisc, THIS_MODULE);
+! 			} else {
+! 
+! 				/*
+! 				 * In case of IGS interface, take the reference of IGS module.
+! 				 */
+! 				if (!nss_igs_module_get()) {
+! 					nss_qdisc_error("Module reference failed for IGS interface %d"
+! 							" , Qdisc %px (type %d)\n", nq->nss_interface_number,
+! 							nq->qdisc, nq->type);
+! 					nss_shaper_unregister_shaping(nq->nss_shaping_ctx);
+! 					atomic_set(&nq->state, NSS_QDISC_STATE_INIT_FAILED);
+! 					goto init_fail;
+! 				}
+! 
+! 				/*
+! 				 * Set the flag to indicate the IGS module reference get is successful.
+! 				 * This flag will be used to decrement the IGS module reference in case
+! 				 * of any error conditions.
+! 				 */
+! 				igs_put = true;
+! 				nq->bounce_context = nss_shaper_register_shaper_bounce_interface(nq->nss_interface_number,
+! 						nss_qdisc_mark_and_schedule, nq->qdisc, THIS_MODULE);
+! 			}
+  
+  			if (!nq->bounce_context) {
+  				nss_qdisc_error("Qdisc %px (type %d): is root but failed "
+--- 2372,2379 ----
+  			/*
+  			 * Register for interface bounce shaping.
+  			 */
+! 			nq->bounce_context = nss_shaper_register_shaper_bounce_interface(nq->nss_interface_number,
+! 					nss_qdisc_bounce_callback, nq->qdisc, THIS_MODULE);
+  
+  			if (!nq->bounce_context) {
+  				nss_qdisc_error("Qdisc %px (type %d): is root but failed "
+*************** int __nss_qdisc_init(struct Qdisc *sch,
+*** 2485,2496 ****
+  	 */
+  	if (!wait_event_timeout(nq->wait_queue, atomic_read(&nq->state) != NSS_QDISC_STATE_IDLE,
+  				NSS_QDISC_COMMAND_TIMEOUT)) {
+- 		/*
+- 		 * Decrement the IGS module reference.
+- 		 */
+- 		if (igs_put) {
+- 			nss_igs_module_put();
+- 		}
+  		nss_qdisc_error("init for qdisc %x timedout!\n", nq->qos_tag);
+  		return -1;
+  	}
+--- 2428,2433 ----
+*************** int __nss_qdisc_init(struct Qdisc *sch,
+*** 2539,2551 ****
+  
+  init_fail:
+  
+- 	/*
+- 	 * Decrement the IGS module reference.
+- 	 */
+- 	if (igs_put) {
+- 		nss_igs_module_put();
+- 	}
+- 
+  #if defined(NSS_QDISC_PPE_SUPPORT)
+  	if (nq->mode == NSS_QDISC_MODE_PPE) {
+  		nss_ppe_destroy(nq);
+--- 2476,2481 ----
+*************** struct tcf_proto __rcu **nss_qdisc_tcf_c
+*** 2711,2725 ****
+  	struct nss_qdisc *nq = qdisc_priv(sch);
+  
+  	/*
+- 	 * Currently filter addition is only supported over IFB interfaces.
+- 	 */
+- 	if (!nss_igs_verify_if_num(nq->nss_interface_number)) {
+- 		nss_qdisc_error("%d is not an ifb interface. Filter addition is only"
+- 				" supported for IFB interfaces.", nq->nss_interface_number);
+- 		return NULL;
+- 	}
+- 
+- 	/*
+  	 * Currently, support is available only for tc filter iterations
+  	 * at root qdisc.
+  	 */
+--- 2641,2646 ----
+*** a/nss_qdisc/nss_qdisc.c	2022-09-03 12:21:34.790000000 +0900
+--- b/nss_qdisc/nss_qdisc.c	2022-09-03 12:22:26.750000000 +0900
+*************** void nss_qdisc_destroy(struct nss_qdisc
+*** 1974,1986 ****
+  		 * Begin by freeing the root shaper node
+  		 */
+  		nss_qdisc_root_cleanup_free_node(nq);
+- 
+- 		/*
+- 		 * In case of IGS interface, release the reference of the IGS module.
+- 		 */
+- 		if (nss_igs_verify_if_num(nq->nss_interface_number)) {
+- 			nss_igs_module_put();
+- 		}
+  	}
+  
+  	/*
+--- 1974,1979 ----
+*** a/nss_qdisc/nss_qdisc.c	2022-09-03 17:10:01.820000000 +0900
+--- b/nss_qdisc/nss_qdisc.c	2022-09-03 17:10:51.450000000 +0900
+*************** bool nss_qdisc_interface_is_virtual(stru
+*** 93,99 ****
+  	 * If there is no bridge client, then bridge gets represented
+  	 * as a redirect interface. So this check is sufficient.
+  	 */
+! 	bool is_virtual = nss_cmn_interface_is_redirect(nss_ctx, if_num) || nss_igs_verify_if_num(if_num);
+  
+  #if defined(NSS_QDISC_BRIDGE_SUPPORT)
+  	is_virtual = is_virtual || nss_bridge_verify_if_num(if_num);
+--- 93,99 ----
+  	 * If there is no bridge client, then bridge gets represented
+  	 * as a redirect interface. So this check is sufficient.
+  	 */
+! 	bool is_virtual = nss_cmn_interface_is_redirect(nss_ctx, if_num);
+  
+  #if defined(NSS_QDISC_BRIDGE_SUPPORT)
+  	is_virtual = is_virtual || nss_bridge_verify_if_num(if_num);
+*************** static int nss_qdisc_ppe_init(struct Qdi
+*** 122,128 ****
+  	/*
+  	 * Bridge and IFB needs PPE looback port shapers.
+  	 */
+! 	if (nq->is_bridge || nss_igs_verify_if_num(nq->nss_interface_number)) {
+  		nss_qdisc_info("Qdisc %px (type %d) init qdisc: %px, needs PPE loopback port\n",
+  			nq->qdisc, nq->type, nq->qdisc);
+  		nq->needs_ppe_loopback = true;
+--- 122,128 ----
+  	/*
+  	 * Bridge and IFB needs PPE looback port shapers.
+  	 */
+! 	if (nq->is_bridge) {
+  		nss_qdisc_info("Qdisc %px (type %d) init qdisc: %px, needs PPE loopback port\n",
+  			nq->qdisc, nq->type, nq->qdisc);
+  		nq->needs_ppe_loopback = true;
+*** a/nss_qdisc/nss_qdisc_stats.c	2022-09-03 17:16:10.830000000 +0900
+--- b/nss_qdisc/nss_qdisc_stats.c	2022-09-03 17:18:54.140000000 +0900
+***************
+*** 17,22 ****
+--- 17,23 ----
+   */
+  
+  #include "nss_qdisc.h"
++ #include "nss_shaper.h"
+  
+  static LIST_HEAD(nss_qdisc_stats_list);			/* List of stats request nodes */
+  static DEFINE_SPINLOCK(nss_qdisc_stats_list_lock);	/* Lock for the stats list */
+*** a/nss_qdisc/nss_qdisc_stats.c	2022-09-03 19:01:31.560000000 +0900
+--- b/nss_qdisc/nss_qdisc_stats.c	2022-09-03 19:02:06.240000000 +0900
+*************** static void nss_qdisc_stats_sync_many_ca
+*** 317,328 ****
+  	/*
+  	 * We get a NACK from FW, which should not happen, restart the request
+  	 */
+  	nss_qdisc_warning("Qdisc %px (type %d): Receive stats FAILED - "
+! 			"response: type: %d\n", qdisc, nq->type,
+  			nim->msg.shaper_configure.config.response_type);
+  	nqsw->stats_request_fail++;
+  	nqsw_nsnsm->last_qos_tag = 0;
+  	nss_qdisc_stats_queue_delayed_work(nq);
+  }
+  
+  /*
+--- 317,330 ----
+  	/*
+  	 * We get a NACK from FW, which should not happen, restart the request
+  	 */
+  	nss_qdisc_warning("Qdisc %px (type %d): Receive stats FAILED - "
+! 			"response: %d type: %d\n", qdisc, nq->type, nim->cm.response, 
+  			nim->msg.shaper_configure.config.response_type);
+  	nqsw->stats_request_fail++;
+  	nqsw_nsnsm->last_qos_tag = 0;
++ #if 0
+  	nss_qdisc_stats_queue_delayed_work(nq);
++ #endif
+  }
+  
+  /*

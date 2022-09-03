@@ -369,3 +369,70 @@
  struct inet6_ifaddr *ipv6_get_ifaddr(struct net *net, const struct in6_addr *addr,
  				     struct net_device *dev, int strict)
  {
+*** a/include/net/sch_generic.h	2022-09-03 20:56:00.080000000 +0900
+--- b/include/net/sch_generic.h	2022-09-03 20:58:25.100000000 +0900
+*************** static inline bool skb_skip_tc_classify(
+*** 740,745 ****
+--- 740,779 ----
+  	return false;
+  }
+  
++ /*
++  * Set skb classify bit field.
++  */
++ static inline void skb_set_tc_classify_offload(struct sk_buff *skb)
++ {
++ #ifdef CONFIG_NET_CLS_ACT
++ 	skb->tc_skip_classify_offload = 1;
++ #endif
++ }
++ 
++ /*
++  * Clear skb classify bit field.
++  */
++ static inline void skb_clear_tc_classify_offload(struct sk_buff *skb)
++ {
++ #ifdef CONFIG_NET_CLS_ACT
++ 	skb->tc_skip_classify_offload = 0;
++ #endif
++ }
++ 
++ /*
++  * Skip skb processing if sent from ifb dev.
++  */
++ static inline bool skb_skip_tc_classify_offload(struct sk_buff *skb)
++ {
++ #ifdef CONFIG_NET_CLS_ACT
++ 	if (skb->tc_skip_classify_offload) {
++ 		skb_clear_tc_classify_offload(skb);
++ 		return true;
++ 	}
++ #endif
++ 	return false;
++ }
++ 
+  /* Reset all TX qdiscs greater than index of a device.  */
+  static inline void qdisc_reset_all_tx_gt(struct net_device *dev, unsigned int i)
+  {
+*** a/include/linux/skbuff.h	2022-09-03 21:05:51.080000000 +0900
+--- b/include/linux/skbuff.h	2022-09-03 21:07:06.260000000 +0900
+*************** typedef unsigned char *sk_buff_data_t;
+*** 646,651 ****
+--- 646,652 ----
+   *	@offload_fwd_mark: Packet was L2-forwarded in hardware
+   *	@offload_l3_fwd_mark: Packet was L3-forwarded in hardware
+   *	@tc_skip_classify: do not classify packet. set by IFB device
++  *	@tc_skip_classify_offload: do not classify packet set by offload IFB device
+   *	@tc_at_ingress: used within tc_classify to distinguish in/egress
+   *	@redirected: packet was redirected by packet classifier
+   *	@from_ingress: packet was redirected from the ingress path
+*************** struct sk_buff {
+*** 850,855 ****
+--- 851,857 ----
+  #ifdef CONFIG_NET_CLS_ACT
+  	__u8			tc_skip_classify:1;
+  	__u8			tc_at_ingress:1;
++ 	__u8			tc_skip_classify_offload:1;
+  
+  	__u16			tc_verd; /* QCA NSS Qdisc Support */
+  #endif

@@ -1,0 +1,406 @@
+*** a/nss_shaper.c	2022-09-03 17:30:21.850000000 +0900
+--- b/nss_shaper.c	2022-09-03 17:39:41.100000000 +0900
+***************
+*** 1,6 ****
+  /*
+   **************************************************************************
+!  * Copyright (c) 2014, 2016-2018 The Linux Foundation. All rights reserved.
+   * Permission to use, copy, modify, and/or distribute this software for
+   * any purpose with or without fee is hereby granted, provided that the
+   * above copyright notice and this permission notice appear in all copies.
+--- 1,6 ----
+  /*
+   **************************************************************************
+!  * Copyright (c) 2014, 2016-2020 The Linux Foundation. All rights reserved.
+   * Permission to use, copy, modify, and/or distribute this software for
+   * any purpose with or without fee is hereby granted, provided that the
+   * above copyright notice and this permission notice appear in all copies.
+***************
+*** 23,29 ****
+  void *nss_shaper_register_shaping(void)
+  {
+  	if (nss_top_main.shaping_handler_id == (uint8_t)-1) {
+! 		nss_warning("%p: SHAPING IS NOT ENABLED", __func__);
+  		return NULL;
+  	}
+  	return (void *)&nss_top_main.nss[nss_top_main.shaping_handler_id];
+--- 23,29 ----
+  void *nss_shaper_register_shaping(void)
+  {
+  	if (nss_top_main.shaping_handler_id == (uint8_t)-1) {
+! 		nss_warning("%px: SHAPING IS NOT ENABLED", __func__);
+  		return NULL;
+  	}
+  	return (void *)&nss_top_main.nss[nss_top_main.shaping_handler_id];
+*************** void *nss_shaper_register_shaper_bounce_
+*** 46,52 ****
+  	struct nss_top_instance *nss_top = &nss_top_main;
+  	struct nss_shaper_bounce_registrant *reg;
+  
+! 	nss_info("Shaper bounce interface register: %u, cb: %p, app_data: %p, owner: %p",
+  			if_num, cb, app_data, owner);
+  
+  	/*
+--- 46,52 ----
+  	struct nss_top_instance *nss_top = &nss_top_main;
+  	struct nss_shaper_bounce_registrant *reg;
+  
+! 	nss_info("Shaper bounce interface register: %u, cb: %px, app_data: %px, owner: %px",
+  			if_num, cb, app_data, owner);
+  
+  	/*
+*************** void *nss_shaper_register_shaper_bounce_
+*** 61,67 ****
+  	 * Shaping enabled?
+  	 */
+  	if (nss_top_main.shaping_handler_id == (uint8_t)-1) {
+! 		nss_warning("%p: SHAPING IS NOT ENABLED", __func__);
+  		return NULL;
+  	}
+  
+--- 61,67 ----
+  	 * Shaping enabled?
+  	 */
+  	if (nss_top_main.shaping_handler_id == (uint8_t)-1) {
+! 		nss_warning("%px: SHAPING IS NOT ENABLED", __func__);
+  		return NULL;
+  	}
+  
+*************** void *nss_shaper_register_shaper_bounce_
+*** 69,75 ****
+  	 * Can we hold the module?
+  	 */
+  	if (!try_module_get(owner)) {
+! 		nss_warning("%p: Unable to hold owner", __func__);
+  		return NULL;
+  	}
+  
+--- 69,75 ----
+  	 * Can we hold the module?
+  	 */
+  	if (!try_module_get(owner)) {
+! 		nss_warning("%px: Unable to hold owner", __func__);
+  		return NULL;
+  	}
+  
+*************** void *nss_shaper_register_shaper_bounce_
+*** 151,157 ****
+  	struct nss_ctx_instance *nss_ctx;
+  	struct nss_shaper_bounce_registrant *reg;
+  
+! 	nss_info("Shaper bounce bridge register: %u, cb: %p, app_data: %p, owner: %p",
+  			if_num, cb, app_data, owner);
+  
+  	/*
+--- 151,157 ----
+  	struct nss_ctx_instance *nss_ctx;
+  	struct nss_shaper_bounce_registrant *reg;
+  
+! 	nss_info("Shaper bounce bridge register: %u, cb: %px, app_data: %px, owner: %px",
+  			if_num, cb, app_data, owner);
+  
+  	/*
+*************** void *nss_shaper_register_shaper_bounce_
+*** 166,172 ****
+  	 * Shaping enabled?
+  	 */
+  	if (nss_top_main.shaping_handler_id == (uint8_t)-1) {
+! 		nss_warning("%p: SHAPING IS NOT ENABLED", __func__);
+  		return NULL;
+  	}
+  
+--- 166,172 ----
+  	 * Shaping enabled?
+  	 */
+  	if (nss_top_main.shaping_handler_id == (uint8_t)-1) {
+! 		nss_warning("%px: SHAPING IS NOT ENABLED", __func__);
+  		return NULL;
+  	}
+  
+*************** void *nss_shaper_register_shaper_bounce_
+*** 174,180 ****
+  	 * Can we hold the module?
+  	 */
+  	if (!try_module_get(owner)) {
+! 		nss_warning("%p: Unable to hold owner", __func__);
+  		return NULL;
+  	}
+  
+--- 174,180 ----
+  	 * Can we hold the module?
+  	 */
+  	if (!try_module_get(owner)) {
+! 		nss_warning("%px: Unable to hold owner", __func__);
+  		return NULL;
+  	}
+  
+*************** nss_tx_status_t nss_shaper_bounce_interf
+*** 277,283 ****
+  		BUG_ON(false);
+  	}
+  
+- 
+  	/*
+  	 * Must have existing registrant
+  	 */
+--- 277,282 ----
+*************** nss_tx_status_t nss_shaper_bounce_interf
+*** 290,302 ****
+  	}
+  	spin_unlock_bh(&nss_top->lock);
+  
+! 	status = nss_core_send_buffer(nss_ctx, if_num, skb, NSS_IF_H2N_DATA_QUEUE, H2N_BUFFER_SHAPER_BOUNCE_INTERFACE, 0);
+  	if (status != NSS_CORE_STATUS_SUCCESS) {
+  		return NSS_TX_FAILURE;
+  	}
+  	nss_hal_send_interrupt(nss_ctx, NSS_H2N_INTR_DATA_COMMAND_QUEUE);
+  
+! 	NSS_PKT_STATS_INCREMENT(nss_ctx, &nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_PACKET]);
+  	return NSS_TX_SUCCESS;
+  }
+  
+--- 289,302 ----
+  	}
+  	spin_unlock_bh(&nss_top->lock);
+  
+! 	status = nss_core_send_buffer(nss_ctx, if_num, skb, NSS_IF_H2N_DATA_QUEUE,
+! 					H2N_BUFFER_SHAPER_BOUNCE_INTERFACE, 0);
+  	if (status != NSS_CORE_STATUS_SUCCESS) {
+  		return NSS_TX_FAILURE;
+  	}
+  	nss_hal_send_interrupt(nss_ctx, NSS_H2N_INTR_DATA_COMMAND_QUEUE);
+  
+! 	NSS_PKT_STATS_INCREMENT(nss_ctx, &nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_PACKET]);
+  	return NSS_TX_SUCCESS;
+  }
+  
+*************** nss_tx_status_t nss_shaper_bounce_bridge
+*** 333,347 ****
+  	}
+  	spin_unlock_bh(&nss_top->lock);
+  
+! 	nss_info("%s: Bridge bounce skb: %p, if_num: %u, ctx: %p", __func__, skb, if_num, nss_ctx);
+! 	status = nss_core_send_buffer(nss_ctx, if_num, skb, NSS_IF_H2N_DATA_QUEUE, H2N_BUFFER_SHAPER_BOUNCE_BRIDGE, 0);
+  	if (status != NSS_CORE_STATUS_SUCCESS) {
+  		nss_info("%s: Bridge bounce core send rejected", __func__);
+  		return NSS_TX_FAILURE;
+  	}
+  	nss_hal_send_interrupt(nss_ctx, NSS_H2N_INTR_DATA_COMMAND_QUEUE);
+  
+! 	NSS_PKT_STATS_INCREMENT(nss_ctx, &nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_PACKET]);
+  	return NSS_TX_SUCCESS;
+  }
+  
+--- 333,348 ----
+  	}
+  	spin_unlock_bh(&nss_top->lock);
+  
+! 	nss_info("%s: Bridge bounce skb: %px, if_num: %u, ctx: %px", __func__, skb, if_num, nss_ctx);
+! 	status = nss_core_send_buffer(nss_ctx, if_num, skb, NSS_IF_H2N_DATA_QUEUE,
+! 					H2N_BUFFER_SHAPER_BOUNCE_BRIDGE, 0);
+  	if (status != NSS_CORE_STATUS_SUCCESS) {
+  		nss_info("%s: Bridge bounce core send rejected", __func__);
+  		return NSS_TX_FAILURE;
+  	}
+  	nss_hal_send_interrupt(nss_ctx, NSS_H2N_INTR_DATA_COMMAND_QUEUE);
+  
+! 	NSS_PKT_STATS_INCREMENT(nss_ctx, &nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_PACKET]);
+  	return NSS_TX_SUCCESS;
+  }
+  
+*** a/exports/nss_shaper.h	2019-08-23 08:12:02.000000000 +0900
+--- b/exports/nss_shaper.h	2022-09-03 17:48:32.000000000 +0900
+***************
+*** 1,6 ****
+  /*
+   **************************************************************************
+!  * Copyright (c) 2014, 2017-2018 The Linux Foundation. All rights reserved.
+   * Permission to use, copy, modify, and/or distribute this software for
+   * any purpose with or without fee is hereby granted, provided that the
+   * above copyright notice and this permission notice appear in all copies.
+--- 1,6 ----
+  /*
+   **************************************************************************
+!  * Copyright (c) 2014, 2017-2018, 2021 The Linux Foundation. All rights reserved.
+   * Permission to use, copy, modify, and/or distribute this software for
+   * any purpose with or without fee is hereby granted, provided that the
+   * above copyright notice and this permission notice appear in all copies.
+*************** enum nss_shaper_config_types {
+*** 59,65 ****
+  	NSS_SHAPER_CONFIG_TYPE_FREE_SHAPER_NODE,
+  	NSS_SHAPER_CONFIG_TYPE_SET_DEFAULT,
+  	NSS_SHAPER_CONFIG_TYPE_SET_ROOT,
+! 	NSS_SHAPER_CONFIG_TYPE_SHAPER_NODE_BASIC_STATS_GET,
+  	NSS_SHAPER_CONFIG_TYPE_SHAPER_NODE_ATTACH,
+  	NSS_SHAPER_CONFIG_TYPE_SHAPER_NODE_DETACH,
+  	NSS_SHAPER_CONFIG_TYPE_SHAPER_NODE_CHANGE_PARAM,
+--- 59,65 ----
+  	NSS_SHAPER_CONFIG_TYPE_FREE_SHAPER_NODE,
+  	NSS_SHAPER_CONFIG_TYPE_SET_DEFAULT,
+  	NSS_SHAPER_CONFIG_TYPE_SET_ROOT,
+! 	NSS_SHAPER_CONFIG_TYPE_SHAPER_NODE_STATS_SYNC_MANY,
+  	NSS_SHAPER_CONFIG_TYPE_SHAPER_NODE_ATTACH,
+  	NSS_SHAPER_CONFIG_TYPE_SHAPER_NODE_DETACH,
+  	NSS_SHAPER_CONFIG_TYPE_SHAPER_NODE_CHANGE_PARAM,
+*************** struct nss_shaper_node_stats {
+*** 672,677 ****
+--- 672,678 ----
+   *	Statistics response for shaper nodes.
+   */
+  struct nss_shaper_node_stats_response {
++ 	uint32_t qos_tag;	/**< QoS tag of the shaper node. */
+  	struct nss_shaper_node_stats sn_stats;	/**< Common shaper node statistics. */
+  
+  	/**
+*************** struct nss_shaper_node_stats_response {
+*** 685,705 ****
+  };
+  
+  /**
+!  * nss_shaper_node_stats_get
+!  *	Statistics of a shaper node.
+   */
+! struct nss_shaper_node_stats_get {
+  
+! 	/*
+! 	 * Request
+! 	 */
+! 	uint32_t qos_tag;	/**< QoS tag of the shaper node. */
+! 
+! 	/*
+! 	 * Response
+! 	 */
+! 	struct nss_shaper_node_stats_response response;
+! 				/**< Shaper node statistics response */
+  };
+  
+  /**
+--- 686,712 ----
+  };
+  
+  /**
+!  * nss_shaper_node_stats_sync_many
+!  * 	Message structure to request shaper node statistics.
+   */
+! struct nss_shaper_node_stats_sync_many {
+  
+!         /*
+!          * Request/Response
+!          */
+!         uint32_t last_qos_tag;                  /**< Last QoS tag. Zero indicates a fresh iteration. */
+! 
+!         /*
+!          * Request
+!          */
+!         uint16_t size;                          /**< Total buffer size indicated by host. */
+! 
+!         /*
+!          * Response
+!          */
+!         uint16_t count;                         /**< Number of shaper nodes for which statistics are copied. */
+!         struct nss_shaper_node_stats_response stats_sync[];
+!                                                 /**< Response to host. */
+  };
+  
+  /**
+*************** struct nss_shaper_configure {
+*** 726,733 ****
+  				/**< Set a shaper to operate in Hybrid mode. */
+  		struct nss_shaper_node_config shaper_node_config;
+  				/**< Configuration message for any type of shaper node. */
+! 		struct nss_shaper_node_stats_get shaper_node_stats_get;
+! 				/**< Statistics for a shaper node. */
+  	} msg;			/**< Types of configuration messages. */
+  };
+  
+--- 733,740 ----
+  				/**< Set a shaper to operate in Hybrid mode. */
+  		struct nss_shaper_node_config shaper_node_config;
+  				/**< Configuration message for any type of shaper node. */
+! 		struct nss_shaper_node_stats_sync_many stats_get;
+! 				/**< Statistics of multiple shaper nodes. */
+  	} msg;			/**< Types of configuration messages. */
+  };
+  
+*** a/exports/nss_if.h	2022-09-03 17:54:18.820000000 +0900
+--- b/exports/nss_if.h	2022-09-03 17:55:09.820000000 +0900
+*************** extern struct nss_ctx_instance *nss_if_r
+*** 294,299 ****
+--- 294,316 ----
+  extern nss_tx_status_t nss_if_tx_buf(struct nss_ctx_instance *nss_ctx, struct sk_buff *os_buf, uint32_t if_num);
+  
+  /**
++  * nss_if_tx_msg_with_size
++  *      Sends a message to the NSS interface.
++  *
++  * @datatypes
++  * nss_ctx_instance \n
++  * nss_if_msg
++  *
++  * @param[in,out] nss_ctx  Pointer to the NSS context.
++  * @param[in]     nim      Pointer to the NSS interface message.
++  * @param[in]     size     Total message buffer size.
++  *
++  * @return
++  * Status of the Tx operation.
++  */
++ nss_tx_status_t nss_if_tx_msg_with_size(struct nss_ctx_instance *nss_ctx, struct nss_if_msg *nim, uint32_t size);
++ 
++ /**
+   * nss_if_tx_msg
+   *	Sends a message to the NSS interface.
+   *
+*** a/nss_if.c	2022-09-03 17:55:33.300000000 +0900
+--- b/nss_if.c	2022-09-03 17:56:58.740000000 +0900
+*************** nss_tx_status_t nss_if_tx_buf(struct nss
+*** 87,92 ****
+--- 87,135 ----
+  }
+  
+  /*
++  * nss_if_tx_msg_with_size()
++  *	Transmit a message to the specific interface on this core with a specified size.
++  */
++ nss_tx_status_t nss_if_tx_msg_with_size(struct nss_ctx_instance *nss_ctx, struct nss_if_msg *nim, uint32_t size)
++ {
++ 	struct nss_cmn_msg *ncm = &nim->cm;
++ 	struct net_device *dev;
++ 
++ 	NSS_VERIFY_CTX_MAGIC(nss_ctx);
++ 
++ 	/*
++ 	 * Sanity check the message
++ 	 */
++ 	if (ncm->type >= NSS_IF_MAX_MSG_TYPES) {
++ 		nss_warning("%px: message type out of range: %d", nss_ctx, ncm->type);
++ 		return NSS_TX_FAILURE;
++ 	}
++ 
++ 	/*
++ 	 * Sanity check the message for valid interfaces.
++ 	 */
++ 	if (ncm->interface < NSS_PHYSICAL_IF_START ||
++ 		ncm->interface >= NSS_MAX_NET_INTERFACES ) {
++ 		nss_warning("%px: Tx request for invalid interface: %d", nss_ctx, ncm->interface);
++ 		return NSS_TX_FAILURE_BAD_PARAM;
++ 	}
++ 
++ 	/*
++ 	 * Trace messages.
++ 	 */
++ 	// QSDK11: nss_if_log_tx_msg(nim);
++ 
++ 	dev = nss_ctx->subsys_dp_register[ncm->interface].ndev;
++ 	if (!dev) {
++ 		nss_warning("%px: Unregister interface %d: no context", nss_ctx, ncm->interface);
++ 		return NSS_TX_FAILURE_BAD_PARAM;
++ 	}
++ 
++ 	return nss_core_send_cmd(nss_ctx, nim, sizeof(*nim), size);
++ }
++ EXPORT_SYMBOL(nss_if_tx_msg_with_size);
++ 
++ /*
+   * nss_if_tx_msg()
+   *	Transmit a message to the specific interface on this core.
+   */
