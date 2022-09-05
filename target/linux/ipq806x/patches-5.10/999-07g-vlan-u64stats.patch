@@ -1,0 +1,332 @@
+*** a/include/linux/u64_stats_sync.h	2022-08-25 18:38:24.000000000 +0900
+--- b/include/linux/u64_stats_sync.h	2022-09-04 18:34:29.930000000 +0900
+***************
+*** 3,38 ****
+  #define _LINUX_U64_STATS_SYNC_H
+  
+  /*
+!  * Protect against 64-bit values tearing on 32-bit architectures. This is
+!  * typically used for statistics read/update in different subsystems.
+   *
+   * Key points :
+!  *
+!  * -  Use a seqcount on 32-bit SMP, only disable preemption for 32-bit UP.
+!  * -  The whole thing is a no-op on 64-bit architectures.
+!  *
+!  * Usage constraints:
+!  *
+!  * 1) Write side must ensure mutual exclusion, or one seqcount update could
+   *    be lost, thus blocking readers forever.
+!  *
+!  * 2) Write side must disable preemption, or a seqcount reader can preempt the
+!  *    writer and also spin forever.
+!  *
+!  * 3) Write side must use the _irqsave() variant if other writers, or a reader,
+!  *    can be invoked from an IRQ context.
+   *
+   * 4) If reader fetches several counters, there is no guarantee the whole values
+!  *    are consistent w.r.t. each other (remember point #2: seqcounts are not
+!  *    used for 64bit architectures).
+   *
+!  * 5) Readers are allowed to sleep or be preempted/interrupted: they perform
+!  *    pure reads.
+   *
+!  * 6) Readers must use both u64_stats_fetch_{begin,retry}_irq() if the stats
+!  *    might be updated from a hardirq or softirq context (remember point #1:
+!  *    seqcounts are not used for UP kernels). 32-bit UP stat readers could read
+!  *    corrupted 64-bit values otherwise.
+   *
+   * Usage :
+   *
+--- 3,35 ----
+  #define _LINUX_U64_STATS_SYNC_H
+  
+  /*
+!  * To properly implement 64bits network statistics on 32bit and 64bit hosts,
+!  * we provide a synchronization point, that is a noop on 64bit or UP kernels.
+   *
+   * Key points :
+!  * 1) Use a seqcount on SMP 32bits, with low overhead.
+!  * 2) Whole thing is a noop on 64bit arches or UP kernels.
+!  * 3) Write side must ensure mutual exclusion or one seqcount update could
+   *    be lost, thus blocking readers forever.
+!  *    If this synchronization point is not a mutex, but a spinlock or
+!  *    spinlock_bh() or disable_bh() :
+!  * 3.1) Write side should not sleep.
+!  * 3.2) Write side should not allow preemption.
+!  * 3.3) If applicable, interrupts should be disabled.
+   *
+   * 4) If reader fetches several counters, there is no guarantee the whole values
+!  *    are consistent (remember point 1) : this is a noop on 64bit arches anyway)
+   *
+!  * 5) readers are allowed to sleep or be preempted/interrupted : They perform
+!  *    pure reads. But if they have to fetch many values, it's better to not allow
+!  *    preemptions/interruptions to avoid many retries.
+!  *
+!  * 6) If counter might be written by an interrupt, readers should block interrupts.
+!  *    (On UP, there is no seqcount_t protection, a reader allowing interrupts could
+!  *     read partial values)
+   *
+!  * 7) For irq and softirq uses, readers can use u64_stats_fetch_begin_irq() and
+!  *    u64_stats_fetch_retry_irq() helpers
+   *
+   * Usage :
+   *
+*************** static inline void u64_stats_inc(u64_sta
+*** 115,127 ****
+  }
+  #endif
+  
+- #if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
+- #define u64_stats_init(syncp)	seqcount_init(&(syncp)->seq)
+- #else
+  static inline void u64_stats_init(struct u64_stats_sync *syncp)
+  {
+! }
+  #endif
+  
+  static inline void u64_stats_update_begin(struct u64_stats_sync *syncp)
+  {
+--- 112,123 ----
+  }
+  #endif
+  
+  static inline void u64_stats_init(struct u64_stats_sync *syncp)
+  {
+! #if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
+! 	seqcount_init(&syncp->seq);
+  #endif
++ }
+  
+  static inline void u64_stats_update_begin(struct u64_stats_sync *syncp)
+  {
+*** a/drivers/net/macvlan.c	2022-09-04 18:53:26.360000000 +0900
+--- b/drivers/net/macvlan.c	2022-09-04 18:55:30.430000000 +0900
+*************** static netdev_tx_t macvlan_start_xmit(st
+*** 570,577 ****
+  
+  		pcpu_stats = this_cpu_ptr(vlan->pcpu_stats);
+  		u64_stats_update_begin(&pcpu_stats->syncp);
+! 		pcpu_stats->tx_packets++;
+! 		pcpu_stats->tx_bytes += len;
+  		u64_stats_update_end(&pcpu_stats->syncp);
+  	} else {
+  		this_cpu_inc(vlan->pcpu_stats->tx_dropped);
+--- 570,577 ----
+  
+  		pcpu_stats = this_cpu_ptr(vlan->pcpu_stats);
+  		u64_stats_update_begin(&pcpu_stats->syncp);
+! 		u64_stats_inc(&pcpu_stats->tx_packets);
+! 		u64_stats_add(&pcpu_stats->tx_bytes, len);
+  		u64_stats_update_end(&pcpu_stats->syncp);
+  	} else {
+  		this_cpu_inc(vlan->pcpu_stats->tx_dropped);
+*************** static void macvlan_dev_get_stats64(stru
+*** 941,951 ****
+  			p = per_cpu_ptr(vlan->pcpu_stats, i);
+  			do {
+  				start = u64_stats_fetch_begin_irq(&p->syncp);
+! 				rx_packets	= p->rx_packets;
+! 				rx_bytes	= p->rx_bytes;
+! 				rx_multicast	= p->rx_multicast;
+! 				tx_packets	= p->tx_packets;
+! 				tx_bytes	= p->tx_bytes;
+  			} while (u64_stats_fetch_retry_irq(&p->syncp, start));
+  
+  			stats->rx_packets	+= rx_packets;
+--- 941,951 ----
+  			p = per_cpu_ptr(vlan->pcpu_stats, i);
+  			do {
+  				start = u64_stats_fetch_begin_irq(&p->syncp);
+! 				rx_packets	= u64_stats_read(&p->rx_packets);
+! 				rx_bytes	= u64_stats_read(&p->rx_bytes);
+! 				rx_multicast	= u64_stats_read(&p->rx_multicast);
+! 				tx_packets	= u64_stats_read(&p->tx_packets);
+! 				tx_bytes	= u64_stats_read(&p->tx_bytes);
+  			} while (u64_stats_fetch_retry_irq(&p->syncp, start));
+  
+  			stats->rx_packets	+= rx_packets;
+*************** static void macvlan_dev_get_stats64(stru
+*** 956,963 ****
+  			/* rx_errors & tx_dropped are u32, updated
+  			 * without syncp protection.
+  			 */
+! 			rx_errors	+= p->rx_errors;
+! 			tx_dropped	+= p->tx_dropped;
+  		}
+  		stats->rx_errors	= rx_errors;
+  		stats->rx_dropped	= rx_errors;
+--- 956,963 ----
+  			/* rx_errors & tx_dropped are u32, updated
+  			 * without syncp protection.
+  			 */
+! 			rx_errors	+= READ_ONCE(p->rx_errors);
+! 			tx_dropped	+= READ_ONCE(p->tx_dropped);
+  		}
+  		stats->rx_errors	= rx_errors;
+  		stats->rx_dropped	= rx_errors;
+*** a/include/linux/if_macvlan.h	2022-09-04 18:56:06.140000000 +0900
+--- b/include/linux/if_macvlan.h	2022-09-04 18:56:37.700000000 +0900
+*************** static inline void macvlan_count_rx(cons
+*** 44,53 ****
+  
+  		pcpu_stats = get_cpu_ptr(vlan->pcpu_stats);
+  		u64_stats_update_begin(&pcpu_stats->syncp);
+! 		pcpu_stats->rx_packets++;
+! 		pcpu_stats->rx_bytes += len;
+  		if (multicast)
+! 			pcpu_stats->rx_multicast++;
+  		u64_stats_update_end(&pcpu_stats->syncp);
+  		put_cpu_ptr(vlan->pcpu_stats);
+  	} else {
+--- 44,53 ----
+  
+  		pcpu_stats = get_cpu_ptr(vlan->pcpu_stats);
+  		u64_stats_update_begin(&pcpu_stats->syncp);
+! 		u64_stats_inc(&pcpu_stats->rx_packets);
+! 		u64_stats_add(&pcpu_stats->rx_bytes, len);
+  		if (multicast)
+! 			u64_stats_inc(&pcpu_stats->rx_multicast);
+  		u64_stats_update_end(&pcpu_stats->syncp);
+  		put_cpu_ptr(vlan->pcpu_stats);
+  	} else {
+*** a/include/linux/if_vlan.h	2022-09-04 18:57:17.460000000 +0900
+--- b/include/linux/if_vlan.h	2022-09-04 18:58:14.430000000 +0900
+*************** static inline void vlan_drop_rx_stag_fil
+*** 116,126 ****
+   *	@tx_dropped: number of tx drops
+   */
+  struct vlan_pcpu_stats {
+! 	u64			rx_packets;
+! 	u64			rx_bytes;
+! 	u64			rx_multicast;
+! 	u64			tx_packets;
+! 	u64			tx_bytes;
+  	struct u64_stats_sync	syncp;
+  	u32			rx_errors;
+  	u32			tx_dropped;
+--- 116,126 ----
+   *	@tx_dropped: number of tx drops
+   */
+  struct vlan_pcpu_stats {
+! 	u64_stats_t		rx_packets;
+! 	u64_stats_t		rx_bytes;
+! 	u64_stats_t		rx_multicast;
+! 	u64_stats_t		tx_packets;
+! 	u64_stats_t		tx_bytes;
+  	struct u64_stats_sync	syncp;
+  	u32			rx_errors;
+  	u32			tx_dropped;
+*** a/net/8021q/vlan_dev.c	2022-09-04 18:58:42.780000000 +0900
+--- b/net/8021q/vlan_dev.c	2022-09-04 19:00:10.800000000 +0900
+*************** static netdev_tx_t vlan_dev_hard_start_x
+*** 128,135 ****
+  
+  		stats = this_cpu_ptr(vlan->vlan_pcpu_stats);
+  		u64_stats_update_begin(&stats->syncp);
+! 		stats->tx_packets++;
+! 		stats->tx_bytes += len;
+  		u64_stats_update_end(&stats->syncp);
+  	} else {
+  		this_cpu_inc(vlan->vlan_pcpu_stats->tx_dropped);
+--- 128,135 ----
+  
+  		stats = this_cpu_ptr(vlan->vlan_pcpu_stats);
+  		u64_stats_update_begin(&stats->syncp);
+! 		u64_stats_inc(&stats->tx_packets);
+! 		u64_stats_add(&stats->tx_bytes, len);
+  		u64_stats_update_end(&stats->syncp);
+  	} else {
+  		this_cpu_inc(vlan->vlan_pcpu_stats->tx_dropped);
+*************** static void vlan_dev_get_stats64(struct
+*** 700,710 ****
+  		p = per_cpu_ptr(vlan_dev_priv(dev)->vlan_pcpu_stats, i);
+  		do {
+  			start = u64_stats_fetch_begin_irq(&p->syncp);
+! 			rxpackets	= p->rx_packets;
+! 			rxbytes		= p->rx_bytes;
+! 			rxmulticast	= p->rx_multicast;
+! 			txpackets	= p->tx_packets;
+! 			txbytes		= p->tx_bytes;
+  		} while (u64_stats_fetch_retry_irq(&p->syncp, start));
+  
+  		stats->rx_packets	+= rxpackets;
+--- 700,710 ----
+  		p = per_cpu_ptr(vlan_dev_priv(dev)->vlan_pcpu_stats, i);
+  		do {
+  			start = u64_stats_fetch_begin_irq(&p->syncp);
+! 			rxpackets	= u64_stats_read(&p->rx_packets);
+! 			rxbytes		= u64_stats_read(&p->rx_bytes);
+! 			rxmulticast	= u64_stats_read(&p->rx_multicast);
+! 			txpackets	= u64_stats_read(&p->tx_packets);
+! 			txbytes		= u64_stats_read(&p->tx_bytes);
+  		} while (u64_stats_fetch_retry_irq(&p->syncp, start));
+  
+  		stats->rx_packets	+= rxpackets;
+*************** static void vlan_dev_get_stats64(struct
+*** 713,720 ****
+  		stats->tx_packets	+= txpackets;
+  		stats->tx_bytes		+= txbytes;
+  		/* rx_errors & tx_dropped are u32 */
+! 		rx_errors	+= p->rx_errors;
+! 		tx_dropped	+= p->tx_dropped;
+  	}
+  	stats->rx_errors  = rx_errors;
+  	stats->tx_dropped = tx_dropped;
+--- 713,720 ----
+  		stats->tx_packets	+= txpackets;
+  		stats->tx_bytes		+= txbytes;
+  		/* rx_errors & tx_dropped are u32 */
+! 		rx_errors	+= READ_ONCE(p->rx_errors);
+! 		tx_dropped	+= READ_ONCE(p->tx_dropped);
+  	}
+  	stats->rx_errors  = rx_errors;
+  	stats->tx_dropped = tx_dropped;
+*** a/net/8021q/vlan_core.c	2022-09-04 19:10:54.330000000 +0900
+--- b/net/8021q/vlan_core.c	2022-09-04 19:11:27.190000000 +0900
+*************** bool vlan_do_receive(struct sk_buff **sk
+*** 62,71 ****
+  	rx_stats = this_cpu_ptr(vlan_dev_priv(vlan_dev)->vlan_pcpu_stats);
+  
+  	u64_stats_update_begin(&rx_stats->syncp);
+! 	rx_stats->rx_packets++;
+! 	rx_stats->rx_bytes += skb->len;
+  	if (skb->pkt_type == PACKET_MULTICAST)
+! 		rx_stats->rx_multicast++;
+  	u64_stats_update_end(&rx_stats->syncp);
+  
+  	return true;
+--- 62,71 ----
+  	rx_stats = this_cpu_ptr(vlan_dev_priv(vlan_dev)->vlan_pcpu_stats);
+  
+  	u64_stats_update_begin(&rx_stats->syncp);
+! 	u64_stats_inc(&rx_stats->rx_packets);
+! 	u64_stats_add(&rx_stats->rx_bytes, skb->len);
+  	if (skb->pkt_type == PACKET_MULTICAST)
+! 		u64_stats_inc(&rx_stats->rx_multicast);
+  	u64_stats_update_end(&rx_stats->syncp);
+  
+  	return true;
+*************** void __vlan_dev_update_accel_stats(struc
+*** 563,572 ****
+  	stats = per_cpu_ptr(vlan_dev_priv(dev)->vlan_pcpu_stats, 0);
+  
+  	u64_stats_update_begin(&stats->syncp);
+! 	stats->rx_packets += nlstats->rx_packets;
+! 	stats->rx_bytes += nlstats->rx_bytes;
+! 	stats->tx_packets += nlstats->tx_packets;
+! 	stats->tx_bytes += nlstats->tx_bytes;
+  	u64_stats_update_end(&stats->syncp);
+  }
+  EXPORT_SYMBOL(__vlan_dev_update_accel_stats);
+--- 563,572 ----
+  	stats = per_cpu_ptr(vlan_dev_priv(dev)->vlan_pcpu_stats, 0);
+  
+  	u64_stats_update_begin(&stats->syncp);
+! 	u64_stats_add(&stats->rx_packets, nlstats->rx_packets);
+! 	u64_stats_add(&stats->rx_bytes, nlstats->rx_bytes);
+! 	u64_stats_add(&stats->tx_packets, nlstats->tx_packets);
+! 	u64_stats_add(&stats->tx_bytes, nlstats->tx_bytes);
+  	u64_stats_update_end(&stats->syncp);
+  }
+  EXPORT_SYMBOL(__vlan_dev_update_accel_stats);
